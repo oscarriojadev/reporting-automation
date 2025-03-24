@@ -1,2 +1,2 @@
-# reporting-automation
-A series of scripts aimed at automating Finance Reports. These scripts handle data processing by taking Excel files as input and generating Excel outputs. They might also support other reporting needs, scheduling, planning, and other related tasks.
+# reporting-merger
+A script designed to automate the consolidation of previous Finance Reports. It processes original Excel files with multiple tabs and generates a consolidated, optimized Excel file with a single, unified table.

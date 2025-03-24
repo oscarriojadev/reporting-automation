@@ -1,2 +1,2 @@
 # reporting-automation
-Here you can find a series of script with the aim of automating Finance Reports including processing data taking excel files as input as well as generating  excel outputs; reporting scheduling and planning, and other scripts that support this endeavour.
+A series of scripts aimed at automating Finance Reports. These scripts handle data processing by taking Excel files as input and generating Excel outputs. They might also support other reporting needs, scheduling, planning, and other related tasks.

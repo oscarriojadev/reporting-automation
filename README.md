@@ -1,111 +1,170 @@
 # reporting-scheduling
 A script to visualize Report Delivery Dates, identifying overlaps and adjusting dates that fall on weekends by moving them to Friday.
 
-    import pandas as pd
     import streamlit as st
+    import pandas as pd
+    from datetime import datetime
+    import numpy as np
     
-    # Función para obtener universidades y fechas por semana
-    def get_universities_for_week(week, df):
-        reports_in_week = df[df['Week'] == week]
-        universities_in_week = reports_in_week[['report_batch_university', 'Fecha_de_Envio']].drop_duplicates()
-        universities_list = [f"{row['report_batch_university']} ({row['Fecha_de_Envio'].strftime('%d-%m-%Y')})" for _, row in universities_in_week.iterrows()]
-        return ', '.join(universities_list)
+    # Mapeo de nombres de universidades
+    UNIVERSITY_SHORTNAMES = {
+        'GA - MIT xPRO': 'xPRO',
+        'GA - The University of Chicago': 'UCPE',
+        'GA - Chicago Booth Executive Education': 'Booth',
+        'GA - MIT Professional Education': 'MIT PE',
+        'GA - Miami Herbert Business School': 'UMiami',
+        'GA - University of Chicago Graham School': 'Graham',
+        'GA - University of Pennsylvania': 'UPenn',
+        'GA - Stanford Center for Professional Development': 'STF'
+    }
     
-    # Función para ajustar las fechas de envío (pasar sábado/domingo al viernes anterior)
-    def adjust_weekend_dates(date):
-        if date.weekday() == 5:  # Sábado
-            return date - pd.Timedelta(days=1)
-        elif date.weekday() == 6:  # Domingo
-            return date - pd.Timedelta(days=2)
-        else:
-            return date
+    def load_data(file):
+        try:
+            if file.name.endswith('.csv'):
+                df = pd.read_csv(file)
+            elif file.name.endswith('.xlsx'):
+                df = pd.read_excel(file)
+            else:
+                st.error('Tipo de archivo no soportado. Sube un archivo CSV o Excel.')
+                return pd.DataFrame()
     
-    # Función para generar el calendario
+            df['Fecha_de_Envio'] = pd.to_datetime(df['Fecha_de_Envio'], format='%d-%m-%Y', errors='coerce')
+            
+            # Convertir nombres de universidades a versiones cortas
+            df['Universidad'] = df['Universidad'].map(UNIVERSITY_SHORTNAMES).fillna(df['Universidad'])
+            
+            # Procesar columna Batch
+            if 'Batch' in df.columns:
+                try:
+                    # Intentar parsear como fecha y formatear
+                    df['Batch'] = pd.to_datetime(df['Batch'], errors='ignore')
+                    df['Batch'] = df['Batch'].dt.strftime('%B %Y')
+                except:
+                    # Si falla, dejar el valor original
+                    df['Batch'] = df['Batch'].astype(str)
+            else:
+                st.warning("La columna 'Batch' no está presente en los datos. Se generará automáticamente.")
+                df['Batch'] = df['Fecha_de_Envio'].dt.strftime('%B %Y')
+            
+            return df
+        except Exception as e:
+            st.error(f"Error al cargar el archivo: {e}")
+            return pd.DataFrame()
+    
     def generate_calendar(df):
-        # Asegurarse de que la columna 'Fecha_de_Envio' existe
-        if 'Fecha_de_Envio' not in df.columns:
-            st.error("La columna 'Fecha_de_Envio' no existe en los datos.")
+        if df.empty:
             return pd.DataFrame()
     
-        # Crear la columna 'report_batch_university' concatenando 'Report Batch' y 'Universidad', convirtiendo a str
-        if 'Report Batch' in df.columns and 'Universidad' in df.columns:
-            df['report_batch_university'] = df['Report Batch'].astype(str) + ' - ' + df['Universidad'].astype(str)
-        else:
-            st.error("Las columnas 'Report Batch' y 'Universidad' no existen en los datos.")
-            return pd.DataFrame()
-    
-        # Convertir 'Fecha_de_Envio' a tipo datetime
-        df['Fecha_de_Envio'] = pd.to_datetime(df['Fecha_de_Envio'], errors='coerce')
-    
-        # Ajustar fechas que caen en sábado o domingo
-        df['Fecha_de_Envio'] = df['Fecha_de_Envio'].apply(adjust_weekend_dates)
+        # Crear rango de fechas
+        min_date = df['Fecha_de_Envio'].min().replace(day=1)
+        max_date = df['Fecha_de_Envio'].max()
+        if max_date.day < 28:
+            max_date = max_date + pd.offsets.MonthEnd()
         
-        # Crear la columna 'Week' a partir de 'Fecha_de_Envio'
-        df['Week'] = df['Fecha_de_Envio'].dt.strftime('%W - %Y')  # semana del año y año
-    
-        # Generar todas las semanas del año
-        weeks_of_year = pd.date_range(start=f'{df["Fecha_de_Envio"].min().year}-01-01', 
-                                      end=f'{df["Fecha_de_Envio"].max().year}-12-31', 
-                                      freq='W-MON').strftime('%W - %Y')
-    
-        # Crear la tabla de calendario con las semanas del año
-        calendar_df = pd.DataFrame({
-            'Week': weeks_of_year,
-            'Monday': [""]*len(weeks_of_year),
-            'Tuesday': [""]*len(weeks_of_year),
-            'Wednesday': [""]*len(weeks_of_year),
-            'Thursday': [""]*len(weeks_of_year),
-            'Friday': [""]*len(weeks_of_year),
-            'Universities': [""]*len(weeks_of_year)
-        })
-    
-        # Rellenar las columnas con el conteo y fecha de entregas
-        for index, week in enumerate(calendar_df['Week']):
-            reports_in_week = df[df['Week'] == week]
-            if not reports_in_week.empty:
-                for _, report in reports_in_week.iterrows():
-                    day_name = report['Fecha_de_Envio'].strftime('%A')
-                    day_number = report['Fecha_de_Envio'].strftime('%d')
-    
-                    # Rellenar solo los días de lunes a viernes
-                    if day_name in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']:
-                        current_value = calendar_df.at[index, day_name]
-                        if current_value:
-                            new_value = f"{current_value}, {day_number} ({len(reports_in_week)})"
-                        else:
-                            new_value = f"{day_number} ({len(reports_in_week)})"
-                        calendar_df.at[index, day_name] = new_value
-    
-                # Llenar el campo de "Universities" con el nombre y fecha de las universidades
-                calendar_df.at[index, 'Universities'] = get_universities_for_week(week, df)
+        all_dates = pd.date_range(start=min_date, end=max_date, freq='D')
         
-        return calendar_df
+        # Crear DataFrame del calendario
+        calendar_df = pd.DataFrame(all_dates, columns=['Date'])
+        calendar_df['Day'] = calendar_df['Date'].dt.day
+        calendar_df['Weekday'] = calendar_df['Date'].dt.weekday
+        calendar_df['Week'] = calendar_df['Date'].dt.isocalendar().week
+        calendar_df['Month'] = calendar_df['Date'].dt.strftime('%B')
+        
+        # Combinar con datos de reportes (universidad + batch)
+        report_dates = df.groupby('Fecha_de_Envio').apply(
+            lambda x: ', '.join([f"{row['Universidad']} ({row['Batch']})" for _, row in x.iterrows()])
+        ).reset_index(name='Universidad')
+        
+        calendar_df = pd.merge(calendar_df, report_dates, left_on='Date', right_on='Fecha_de_Envio', how='left')
+        
+        # Filtrar solo días laborables (Lunes-Viernes)
+        calendar_df = calendar_df[calendar_df['Weekday'] < 5]
+        
+        # Crear tabla pivote
+        pivot_df = calendar_df.pivot_table(index=['Week', 'Month'], 
+                                         columns='Weekday', 
+                                         values='Universidad', 
+                                         aggfunc='first')
+        
+        # Obtener números de día como strings (sin decimales)
+        day_numbers = calendar_df.pivot_table(index=['Week', 'Month'], 
+                                            columns='Weekday', 
+                                            values='Day', 
+                                            aggfunc=lambda x: str(int(x.iloc[0])) if not pd.isna(x.iloc[0]) else np.nan)
+        
+        # Asegurar que tenemos los 5 días laborables
+        for i in range(5):
+            if i not in pivot_df.columns:
+                pivot_df[i] = np.nan
+            if i not in day_numbers.columns:
+                day_numbers[i] = np.nan
+        
+        # Ordenar columnas
+        pivot_df = pivot_df.reindex(sorted(pivot_df.columns), axis=1)
+        day_numbers = day_numbers.reindex(sorted(day_numbers.columns), axis=1)
+        
+        # Combinar datos
+        result_df = pivot_df.copy()
+        for col in result_df.columns:
+            result_df[col] = result_df[col].where(pd.notnull(result_df[col]), day_numbers[col])
+        
+        # Renombrar columnas
+        result_df.columns = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes']
+        
+        return result_df.reset_index()
     
-    # Función para mostrar la tabla con detalles en una ventana emergente
-    def show_details_popup(df):
-        if st.button('Ver más detalles'):
-            with st.expander("Detalles del calendario"):
-                st.write(df)
+    def style_calendar(df):
+        def contar_universidades(x):
+            if isinstance(x, str) and x.replace('.','',1).isdigit():  # Si es número de día
+                return 0
+            elif isinstance(x, str):
+                return len(x.split(','))  # Contar universidades
+            return 0
+        
+        counts = df[['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes']].applymap(contar_universidades)
+        min_val = counts.min().min()
+        max_val = counts.max().max()
+        
+        def color_celda(val):
+            if isinstance(val, str) and ',' in val:  # Múltiples entregas
+                count = len(val.split(','))
+                intensity = (count - min_val) / (max_val - min_val) if max_val > min_val else 0.5
+                return f'background-color: rgba(0, 100, 255, {0.3 + intensity*0.7}); color: white'
+            elif isinstance(val, str) and '(' in val:  # Entrega única
+                return 'background-color: rgba(0, 100, 255, 0.3); color: white'
+            elif isinstance(val, str) and val.replace('.','',1).isdigit():  # Número de día
+                return 'background-color: #f5f5f5; color: #333; font-weight: bold'  # Fondo gris claro, texto oscuro
+            return ''
+        
+        styled_df = df.style.applymap(color_celda, subset=['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'])
+        
+        return styled_df, counts
     
-    # Subir archivo Excel
-    uploaded_file = st.file_uploader("Sube un archivo Excel", type=["xlsx"])
+    # Interfaz de usuario
+    st.title('Calendario de Envío de Reportes')
     
-    if uploaded_file is not None:
-        # Leer el archivo Excel
-        df = pd.read_excel(uploaded_file)
+    archivo_subido = st.file_uploader('Sube tu archivo CSV o Excel', type=['csv', 'xlsx'])
     
-        # Asegurarse de que tiene las columnas necesarias
-        if 'Fecha_de_Envio' in df.columns and 'Report Batch' in df.columns and 'Universidad' in df.columns:
-            # Generar el calendario
-            calendar_df = generate_calendar(df)
+    if archivo_subido:
+        df = load_data(archivo_subido)
     
-            # Mostrar la tabla con conteos de entregas por semana
-            st.write("Calendario de Entregas")
-            st.dataframe(calendar_df)
+        st.subheader('Datos Cargados')
+        st.write(df)
     
-            # Mostrar detalles adicionales en ventana emergente
-            show_details_popup(calendar_df)
+        if not df.empty:
+            calendario_df = generate_calendar(df)
+    
+            st.subheader('Calendario de Entregas')
+            if not calendario_df.empty:
+                calendario_estilizado, conteos = style_calendar(calendario_df)
+                st.dataframe(calendario_estilizado, height=800)
+                
+                st.subheader('Resumen por Día de la Semana')
+                st.bar_chart(conteos.sum().rename('Total Entregas'))
+            else:
+                st.warning('No hay datos para mostrar en el calendario.')
         else:
-            st.error("El archivo debe contener las columnas 'Fecha_de_Envio', 'Report Batch' y 'Universidad'.")
-    else:
-        st.info("Por favor, sube un archivo Excel para generar el calendario.")
+            st.warning('El archivo no contiene datos válidos.')
+                st.error("El archivo debe contener las columnas 'Fecha_de_Envio', 'Report Batch' y 'Universidad'.")
+        else:
+            st.info("Por favor, sube un archivo Excel para generar el calendario.")

@@ -88,7 +88,7 @@ def generate_calendar(df):
 
         calendar_df = pd.DataFrame({
             'Date': all_dates,
-            'Week': all_dates.strftime('%U'),
+            'Week': (all_dates.isocalendar().week).astype(str),  # Using ISO week number
             'Weekday': all_dates.strftime('%A'),
             'WeekdayNum': all_dates.weekday,
             'Month': all_dates.strftime('%B'),
